@@ -57,7 +57,7 @@ export const number: Parser<unknown, number> = (v, ctx) => {
   throw error(`Value ${String(v)} is not a number`, ctx);
 };
 
-const isRecord = (v: unknown): v is Record<any, any> => typeof v === 'object' && v !== null && !Array.isArray(v);
+const isRecord = (v: unknown): v is Record<PropertyKey, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
 export const object =
   <T extends { [k in keyof T]: T[k] }>(o: { [k in keyof T]: Parser<unknown, T[k]> }): Parser<unknown, T> =>
@@ -88,12 +88,12 @@ export const object =
     throw error(`Value ${String(input)} is not an object`, ctx);
   };
 
-export const record: Parser<unknown, object> = (v, ctx) => {
+export const record: Parser<unknown, Record<PropertyKey, unknown>> = (v, ctx) => {
   if (isRecord(v)) {
     return v;
   }
 
-  throw error(`Value ${String(v)} is not an object`, ctx);
+  throw error(`Value ${String(v)} is not an record.`, ctx);
 };
 
 export const array =
@@ -154,7 +154,7 @@ export const map =
 
 export const constant =
   <T, U>(x: U) =>
-  (_v: T, _ctx: ParsingCtx) =>
+  (_v: T, _ctx: ParsingCtx): U =>
     x;
 
 export const identity = <T>(v: T, _ctx: ParsingCtx) => v;
