@@ -154,7 +154,7 @@ export const map =
 
 export const constant =
   <T, U>(x: U) =>
-  (_v: T, _ctx: ParsingCtx) =>
+  (_v: T, _ctx: ParsingCtx): U =>
     x;
 
 export const identity = <T>(v: T, _ctx: ParsingCtx) => v;

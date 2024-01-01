@@ -1,29 +1,43 @@
 import http from 'node:http';
-import { ServerInfo, ServerSettings } from './types.js';
+import { ServerInfo, ServerMetric, ServerSettings } from './types.js';
 import * as parsers from './parsers.js';
 
-export const parseServersSettings = (str: string) => {
+export const parseServersSettings = (x: unknown) => {
+  if (x === undefined) throw new Error('SERVERS env. variable must be provided.');
+
   try {
+    const str = parsers.runParser(parsers.string, x);
+
     return parsers.runParser(
       parsers.array(
         parsers.object<ServerSettings>({
-          url: parsers.string,
+          host: parsers.string,
         })
       ),
       JSON.parse(str)
     );
   } catch (err) {
-    throw new Error(`SERVERS env. variable parsing failed\n${err}`);
+    throw new Error(`SERVERS env. variable parsing failed.\n${err}`);
   }
 };
 
 export const parseServerInfo = (jsonStr: string) => {
   return parsers.runParser(
     parsers.object<ServerInfo>({
-      connections: parsers.number,
+      host: parsers.string,
+      [ServerMetric.Connections]: parsers.number,
+      [ServerMetric.Cpu]: parsers.number,
     }),
     JSON.parse(jsonStr)
   );
+};
+
+export const parseServersUsageMetric = (x: unknown): ServerMetric | undefined => {
+  try {
+    return parsers.runParser(parsers.optional(parsers.shallowEnum(ServerMetric)), x);
+  } catch (err) {
+    throw new Error(`SERVERS_USAGE_METRIC env. variable parsing failed.\n${err}`);
+  }
 };
 
 export const receiveJson = (res: http.IncomingMessage): Promise<string> =>
@@ -52,7 +66,7 @@ export const collectServersInfos = async (serversSettings: ServerSettings[]): Pr
   const reqs: Promise<ServerInfo>[] = serversSettings.map(
     s =>
       new Promise((resolve, reject) => {
-        const url = `${s.url}/info`;
+        const url = `http://${s.host}/info`;
         const getErrMsg = (err: unknown) => `GET ${url}: ${err}`;
         const req = http.get(url, async res => {
           try {
@@ -91,3 +105,6 @@ export const collectServersInfos = async (serversSettings: ServerSettings[]): Pr
 
   return infos;
 };
+
+export const evaluatePreferedServer = (serversInfos: ServerInfo[], metric: ServerMetric = ServerMetric.Connections) =>
+  serversInfos.reduce((prev, curr) => (curr[metric] < prev[metric] ? curr : prev));

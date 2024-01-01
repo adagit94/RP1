@@ -1,24 +1,36 @@
 import 'dotenv/config';
+import http from 'node:http';
 import https from 'node:https';
 import fs from 'node:fs';
 import { setInterval } from 'node:timers';
 import { DosProtection } from './protections/DosProtection.js';
 import { ServerInfo, ServerSettings } from './types.js';
-import { collectServersInfos, parseServersSettings } from './utils.js';
+import { collectServersInfos, evaluatePreferedServer, parseServersSettings, parseServersUsageMetric } from './utils.js';
 
-const { PORT, ALLOWED_ORIGINS, SERVERS, SERVERS_CHECK_INTERVAL, CONNECTIONS_LIMIT, CONNECTION_TIMEOUT, REQ_TRANSFER_TIMEOUT, MAX_REQ_BYTES } = process.env;
+const {
+  PORT,
+  ALLOWED_ORIGINS,
+  SERVERS,
+  SERVERS_USAGE_METRIC,
+  SERVERS_CHECK_INTERVAL,
+  CONNECTIONS_LIMIT,
+  CONNECTION_TIMEOUT,
+  REQ_TRANSFER_TIMEOUT,
+  MAX_REQ_BYTES,
+} = process.env;
 
-if (SERVERS === undefined) throw new Error('SERVERS env. variable must be provided.');
 if (Number.isNaN(SERVERS_CHECK_INTERVAL)) throw new Error('SERVERS_CHECK_INTERVAL env. variable number must be provided.');
 if (Number.isNaN(CONNECTIONS_LIMIT)) throw new Error('CONNECTIONS_LIMIT env. variable number must be provided.');
 if (Number.isNaN(CONNECTION_TIMEOUT)) throw new Error('CONNECTION_TIMEOUT env. variable number must be provided.');
 if (Number.isNaN(REQ_TRANSFER_TIMEOUT)) throw new Error('REQ_TRANSFER_TIMEOUT env. variable number must be provided.');
 if (Number.isNaN(MAX_REQ_BYTES)) throw new Error('MAX_REQ_BYTES env. variable number must be provided.');
 
+const usageMetric = parseServersUsageMetric(SERVERS_USAGE_METRIC);
+const serversSettings: ServerSettings[] = parseServersSettings(SERVERS);
 const dosProtection = new DosProtection({ connectionsLimit: Number(CONNECTIONS_LIMIT) });
 const allowedOrigins = ALLOWED_ORIGINS ? ALLOWED_ORIGINS.split(',') : undefined;
-const serversSettings: ServerSettings[] = parseServersSettings(SERVERS);
-let serversInfos: ServerInfo[] = await collectServersInfos(serversSettings);
+
+let preferedServer: ServerInfo = evaluatePreferedServer(await collectServersInfos(serversSettings), usageMetric);
 
 const proxy = https
   .createServer(
@@ -57,6 +69,19 @@ const proxy = https
           res.end();
           return;
         }
+
+        if (req.url === undefined) {
+          res.writeHead(400, 'Url not found.');
+          res.end();
+          return;
+        }
+
+        const urlObject = new URL(req.url, `https://${req.headers.host}`);
+        const serverReq = http.request(
+          `http://${preferedServer.host}${urlObject.pathname.length > 1 ? urlObject.pathname : ''}${urlObject.search}`,
+          { method: req.method },
+          res => {}
+        );
       } catch (err) {
         console.error(err);
 
@@ -67,14 +92,10 @@ const proxy = https
       }
     }
   )
-  .listen(PORT);
+  .listen(Number(PORT));
 
 setInterval(async () => {
-  serversInfos = await collectServersInfos(serversSettings);
-}, Number(SERVERS_CHECK_INTERVAL));
+  const serversInfos: ServerInfo[] = await collectServersInfos(serversSettings);
 
-// if (req.url === undefined) {
-//   res.writeHead(400, 'Url not found.');
-//   res.end();
-//   return;
-// }
+  preferedServer = evaluatePreferedServer(serversInfos, usageMetric);
+}, Number(SERVERS_CHECK_INTERVAL));

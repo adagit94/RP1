@@ -1,7 +1,14 @@
-export type ServerSettings = {
-  url: string
+export enum ServerMetric {
+  Connections = 'connections',
+  Cpu = 'cpu',
 }
 
+export type ServerSettings = {
+  host: string;
+};
+
 export type ServerInfo = {
-  connections: number
-}
+  host: string;
+  [ServerMetric.Connections]: number;
+  [ServerMetric.Cpu]: number;
+};
