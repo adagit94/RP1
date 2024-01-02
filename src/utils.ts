@@ -1,5 +1,5 @@
 import http from 'node:http';
-import { ServerInfo, ServerMetric, ServerSettings } from './types.js';
+import { ServerInfo, ServerMetric, ServerSettings, ServerState } from './types.js';
 import * as parsers from './parsers.js';
 
 export const parseServersSettings = (x: unknown) => {
@@ -7,8 +7,7 @@ export const parseServersSettings = (x: unknown) => {
 
   try {
     const str = parsers.runParser(parsers.string, x);
-
-    return parsers.runParser(
+    const serversSettings = parsers.runParser(
       parsers.array(
         parsers.object<ServerSettings>({
           host: parsers.string,
@@ -16,6 +15,10 @@ export const parseServersSettings = (x: unknown) => {
       ),
       JSON.parse(str)
     );
+
+    if (serversSettings.length === 0) throw new Error(`No servers defined.`)
+
+    return serversSettings
   } catch (err) {
     throw new Error(`SERVERS env. variable parsing failed.\n${err}`);
   }
@@ -24,7 +27,6 @@ export const parseServersSettings = (x: unknown) => {
 export const parseServerInfo = (jsonStr: string) => {
   return parsers.runParser(
     parsers.object<ServerInfo>({
-      host: parsers.string,
       [ServerMetric.Connections]: parsers.number,
       [ServerMetric.Cpu]: parsers.number,
     }),
@@ -106,5 +108,20 @@ export const collectServersInfos = async (serversSettings: ServerSettings[]): Pr
   return infos;
 };
 
-export const evaluatePreferedServer = (serversInfos: ServerInfo[], metric: ServerMetric = ServerMetric.Connections) =>
+export const evaluatePreferedServerInfo = (serversInfos: ServerInfo[], metric: ServerMetric = ServerMetric.Connections) =>
   serversInfos.reduce((prev, curr) => (curr[metric] < prev[metric] ? curr : prev));
+
+export const evaluatePreferedServerIndex = (serversStates: ServerState[]) => {
+  let serverState: ServerState | undefined;
+  let index = -1
+
+  for (let i = 0; i < serversStates.length; i++) {
+    const s = serversStates[i];
+
+    if (serverState === undefined || s.connections < serverState.connections) {
+      index = i;
+    }
+  }
+
+  return index;
+};

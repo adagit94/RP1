@@ -8,7 +8,10 @@ export type ServerSettings = {
 };
 
 export type ServerInfo = {
-  host: string;
   [ServerMetric.Connections]: number;
   [ServerMetric.Cpu]: number;
+};
+
+export type ServerState = {
+  connections: number;
 };
