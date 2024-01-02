@@ -38,7 +38,7 @@ const proxy = https
       requestTimeout: Number(REQ_TRANSFER_TIMEOUT),
       connectionsCheckingInterval: 1000,
     },
-    (req, res) => {
+    async (req, res) => {
       try {
         dosProtection.addConnection();
         res.once('close', dosProtection.subtractConnection);
@@ -68,19 +68,7 @@ const proxy = https
           return;
         }
 
-        if (req.url === undefined) {
-          res.writeHead(400, 'Url not found.');
-          res.end();
-          return;
-        }
-
-        const preferedServer = serversSettings[evaluatePreferedServerIndex(serversStates)]
-        const urlObject = new URL(req.url, `https://${req.headers.host}`);
-        const serverReq = http.request(
-          `http://${preferedServer.host}${urlObject.pathname.length > 1 ? urlObject.pathname : ''}${urlObject.search}`,
-          { method: req.method },
-          serverRes => {}
-        );
+        await sent(req, res);
       } catch (err) {
         console.error(err);
 
@@ -92,3 +80,20 @@ const proxy = https
     }
   )
   .listen(Number(PORT));
+
+const sent = async (req: http.IncomingMessage, res: http.ServerResponse) => {
+  if (req.url === undefined) {
+    res.writeHead(400, 'Url not found.');
+    res.end();
+    return;
+  }
+
+  const preferedServer = serversSettings[evaluatePreferedServerIndex(serversStates)];
+  let urlIn = new URL(req.url, `https://${req.headers.host}`);
+
+  urlIn.host = preferedServer.host;
+  urlIn.protocol = 'http';
+
+  const urlOut = new URL(urlIn);
+  const serverReq = http.request(urlOut, { method: req.method }, serverRes => {});
+};
