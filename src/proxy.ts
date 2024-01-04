@@ -1,10 +1,11 @@
 import 'dotenv/config';
 import http from 'node:http';
 import https from 'node:https';
+import net from 'node:net';
 import fs from 'node:fs';
 import { DosProtection } from './protections/DosProtection.js';
 import { ServerSettings, ServerState } from './types.js';
-import { evaluatePreferedServerIndex, parseServersSettings, parseServersUsageMetric } from './utils.js';
+import { createUrlOut, evaluatePreferedServer, parseServersSettings, parseServersUsageMetric } from './utils.js';
 
 const {
   PORT,
@@ -68,7 +69,7 @@ const proxy = https
           return;
         }
 
-        await sent(req, res);
+        send(req, res);
       } catch (err) {
         console.error(err);
 
@@ -81,19 +82,65 @@ const proxy = https
   )
   .listen(Number(PORT));
 
-const sent = async (req: http.IncomingMessage, res: http.ServerResponse) => {
+// proxy.on('connect', async (req, socket, head) => {
+
+//   }
+// });
+
+const send = (req: http.IncomingMessage, res: http.ServerResponse) => {
   if (req.url === undefined) {
-    res.writeHead(400, 'Url not found.');
+    res.writeHead(400, 'Url not present.');
     res.end();
     return;
   }
 
-  const preferedServer = serversSettings[evaluatePreferedServerIndex(serversStates)];
-  let urlIn = new URL(req.url, `https://${req.headers.host}`);
+  if (req.headers.host === undefined) {
+    res.writeHead(400, 'Host header not present.');
+    res.end();
+    return;
+  }
 
-  urlIn.host = preferedServer.host;
-  urlIn.protocol = 'http';
+  const [preferedServerState, preferedServerIndex] = evaluatePreferedServer(serversStates);
+  const preferedServerSettings = serversSettings[preferedServerIndex];
 
-  const urlOut = new URL(urlIn);
-  const serverReq = http.request(urlOut, { method: req.method }, serverRes => {});
+  const url = createUrlOut(req.url, req.headers.host, preferedServerSettings);
+  let preferedServerHeaders: http.OutgoingHttpHeaders = {};
+
+  for (const [k, v] of Object.entries(req.headers)) {
+    preferedServerHeaders[k] = v;
+  }
+
+  const preferedServerReq = http.request(url, { method: req.method, headers: preferedServerHeaders }, preferedServerRes => {
+    if (preferedServerRes.statusCode !== undefined) res.statusCode = preferedServerRes.statusCode;
+
+    for (const [k, v] of Object.entries(preferedServerRes.headers)) {
+      if (v !== undefined) res.setHeader(k, v);
+    }
+
+    preferedServerRes.on('end', () => {
+      res.writeHead(200)
+      res.end()
+    });
+    preferedServerRes.pipe(res);
+  });
+
+  preferedServerReq.once('close', () => {
+    preferedServerState.connections--;
+  });
+  preferedServerReq.once('error', err => {
+    res.writeHead(400, err.message);
+    res.end();
+  });
+
+  preferedServerState.connections++;
+
+  req.pipe(preferedServerReq);
 };
+
+// const clientSocket = net.createConnection(Number(PORT), req.headers.host);
+// const serverSocket = net.connect(Number(urlOut.port), urlOut.host, () => {
+//   // clientSocket.write('HTTP/1.1 200 Connection Established\r\n' + 'Proxy-agent: Proxy');
+//   // serverSocket.write(head);
+//   serverSocket.pipe(clientSocket);
+//   clientSocket.pipe(serverSocket);
+// });

@@ -1,5 +1,5 @@
 import http from 'node:http';
-import { ServerInfo, ServerMetric, ServerSettings, ServerState } from './types.js';
+import { RemoteServerState, RemoteServerMetric, ServerSettings, ServerState } from './types.js';
 import * as parsers from './parsers.js';
 
 export const parseServersSettings = (x: unknown) => {
@@ -16,27 +16,27 @@ export const parseServersSettings = (x: unknown) => {
       JSON.parse(str)
     );
 
-    if (serversSettings.length === 0) throw new Error(`No servers defined.`)
+    if (serversSettings.length === 0) throw new Error(`No servers defined.`);
 
-    return serversSettings
+    return serversSettings;
   } catch (err) {
     throw new Error(`SERVERS env. variable parsing failed.\n${err}`);
   }
 };
 
-export const parseServerInfo = (jsonStr: string) => {
+export const parseRemoteServerState = (jsonStr: string) => {
   return parsers.runParser(
-    parsers.object<ServerInfo>({
-      [ServerMetric.Connections]: parsers.number,
-      [ServerMetric.Cpu]: parsers.number,
+    parsers.object<RemoteServerState>({
+      [RemoteServerMetric.Connections]: parsers.number,
+      [RemoteServerMetric.Cpu]: parsers.number,
     }),
     JSON.parse(jsonStr)
   );
 };
 
-export const parseServersUsageMetric = (x: unknown): ServerMetric | undefined => {
+export const parseServersUsageMetric = (x: unknown): RemoteServerMetric | undefined => {
   try {
-    return parsers.runParser(parsers.optional(parsers.shallowEnum(ServerMetric)), x);
+    return parsers.runParser(parsers.optional(parsers.shallowEnum(RemoteServerMetric)), x);
   } catch (err) {
     throw new Error(`SERVERS_USAGE_METRIC env. variable parsing failed.\n${err}`);
   }
@@ -64,8 +64,8 @@ export const receiveJson = (res: http.IncomingMessage): Promise<string> =>
     res.on('error', reject);
   });
 
-export const collectServersInfos = async (serversSettings: ServerSettings[]): Promise<ServerInfo[]> => {
-  const reqs: Promise<ServerInfo>[] = serversSettings.map(
+export const collectServersInfos = async (serversSettings: ServerSettings[]): Promise<RemoteServerState[]> => {
+  const reqs: Promise<RemoteServerState>[] = serversSettings.map(
     s =>
       new Promise((resolve, reject) => {
         const url = `http://${s.host}/info`;
@@ -74,7 +74,7 @@ export const collectServersInfos = async (serversSettings: ServerSettings[]): Pr
           try {
             if (res.statusCode === 200) {
               const jsonStr = await receiveJson(res);
-              const info = parseServerInfo(jsonStr);
+              const info = parseRemoteServerState(jsonStr);
 
               resolve(info);
             } else {
@@ -90,7 +90,7 @@ export const collectServersInfos = async (serversSettings: ServerSettings[]): Pr
   );
 
   const results = await Promise.allSettled(reqs);
-  let infos: ServerInfo[] = [];
+  let infos: RemoteServerState[] = [];
 
   for (const result of results) {
     switch (result.status) {
@@ -108,20 +108,30 @@ export const collectServersInfos = async (serversSettings: ServerSettings[]): Pr
   return infos;
 };
 
-export const evaluatePreferedServerInfo = (serversInfos: ServerInfo[], metric: ServerMetric = ServerMetric.Connections) =>
-  serversInfos.reduce((prev, curr) => (curr[metric] < prev[metric] ? curr : prev));
+// export const evaluatePreferedServer = (states: RemoteServerState[], metric: RemoteServerMetric = RemoteServerMetric.Connections) =>
+//   states.reduce((prev, curr) => (curr[metric] < prev[metric] ? curr : prev));
 
-export const evaluatePreferedServerIndex = (serversStates: ServerState[]) => {
-  let serverState: ServerState | undefined;
-  let index = -1
+export const evaluatePreferedServer = (states: ServerState[]): [ServerState, number] => {
+  let serverState = states[0];
+  let index = 0;
 
-  for (let i = 0; i < serversStates.length; i++) {
-    const s = serversStates[i];
+  for (let i = 1; i < states.length; i++) {
+    const s = states[i];
 
-    if (serverState === undefined || s.connections < serverState.connections) {
+    if (s.connections < serverState.connections) {
       index = i;
+      serverState = s;
     }
   }
 
-  return index;
+  return [serverState, index];
 };
+
+export const createUrlOut = (url: string, host: string, serverSettings: ServerSettings) => {
+  let urlIn = new URL(url, `https://${host}`);
+
+  urlIn.host = serverSettings.host;
+  urlIn.protocol = 'http';
+
+  return new URL(urlIn);
+}
