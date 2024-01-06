@@ -1,25 +1,27 @@
 import 'dotenv/config';
 import http from 'node:http';
 import https from 'node:https';
-import net from 'node:net';
 import fs from 'node:fs';
 import { DosProtection } from './protections/DosProtection.js';
 import { ServerSettings, ServerState } from './types.js';
 import { createUrlOut, evaluatePreferedServer, parseServersSettings, parseServersUsageMetric } from './utils.js';
+import { runParser, string } from './parsers.js';
 
 const {
+  HOST,
   PORT,
   ALLOWED_ORIGINS,
   SERVERS,
-  // SERVERS_USAGE_METRIC,
-  // SERVERS_CHECK_INTERVAL,
   CONNECTIONS_LIMIT,
   CONNECTION_TIMEOUT,
   REQ_TRANSFER_TIMEOUT,
   MAX_REQ_BYTES,
+  // SERVERS_USAGE_METRIC,
+  // SERVERS_CHECK_INTERVAL,
 } = process.env;
 
 // if (Number.isNaN(SERVERS_CHECK_INTERVAL)) throw new Error('SERVERS_CHECK_INTERVAL env. variable number must be provided.');
+if (HOST === undefined) throw new Error('HOST env. variable must be provided.');
 if (Number.isNaN(CONNECTIONS_LIMIT)) throw new Error('CONNECTIONS_LIMIT env. variable number must be provided.');
 if (Number.isNaN(CONNECTION_TIMEOUT)) throw new Error('CONNECTION_TIMEOUT env. variable number must be provided.');
 if (Number.isNaN(REQ_TRANSFER_TIMEOUT)) throw new Error('REQ_TRANSFER_TIMEOUT env. variable number must be provided.');
@@ -31,7 +33,7 @@ const serversStates: ServerState[] = serversSettings.map(() => ({ connections: 0
 const dosProtection = new DosProtection({ connectionsLimit: Number(CONNECTIONS_LIMIT) });
 const allowedOrigins = ALLOWED_ORIGINS ? ALLOWED_ORIGINS.split(',') : undefined;
 
-const proxy = https
+https
   .createServer(
     {
       key: fs.readFileSync('cert/key.pem'),
@@ -69,7 +71,7 @@ const proxy = https
           return;
         }
 
-        send(req, res);
+        await send(req, res);
       } catch (err) {
         console.error(err);
 
@@ -82,20 +84,15 @@ const proxy = https
   )
   .listen(Number(PORT));
 
-// proxy.on('connect', async (req, socket, head) => {
-
-//   }
-// });
-
-const send = (req: http.IncomingMessage, res: http.ServerResponse) => {
-  if (req.url === undefined) {
-    res.writeHead(400, 'Url not present.');
+const send = async (req: http.IncomingMessage, res: http.ServerResponse) => {
+  if (req.method === undefined) {
+    res.writeHead(400, 'Method isnt present.');
     res.end();
     return;
   }
 
-  if (req.headers.host === undefined) {
-    res.writeHead(400, 'Host header not present.');
+  if (req.url === undefined) {
+    res.writeHead(400, 'Url isnt present.');
     res.end();
     return;
   }
@@ -103,38 +100,63 @@ const send = (req: http.IncomingMessage, res: http.ServerResponse) => {
   const [preferedServerState, preferedServerIndex] = evaluatePreferedServer(serversStates);
   const preferedServerSettings = serversSettings[preferedServerIndex];
 
-  const url = createUrlOut(req.url, req.headers.host, preferedServerSettings);
+  const url = createUrlOut(req.url, req.headers.host ?? HOST, preferedServerSettings);
   let preferedServerHeaders: http.OutgoingHttpHeaders = {};
 
   for (const [k, v] of Object.entries(req.headers)) {
     preferedServerHeaders[k] = v;
   }
 
-  const preferedServerReq = http.request(url, { method: req.method, headers: preferedServerHeaders }, preferedServerRes => {
-    if (preferedServerRes.statusCode !== undefined) res.statusCode = preferedServerRes.statusCode;
+  const preferedServerReq = req.pipe(http.request(url, { method: req.method, headers: preferedServerHeaders }));
 
-    for (const [k, v] of Object.entries(preferedServerRes.headers)) {
-      if (v !== undefined) res.setHeader(k, v);
+  await new Promise((resolve, reject) => {
+    try {
+      preferedServerReq.on('response', preferedServerRes => {
+        try {
+          // if (preferedServerRes.statusCode !== undefined) res.statusCode = preferedServerRes.statusCode;
+
+          for (const [k, v] of Object.entries(preferedServerRes.headers)) {
+            if (v !== undefined) res.setHeader(k, v);
+          }
+
+          preferedServerRes.once('end', () => {
+            console.log('res: end');
+
+            res.writeHead(res.statusCode, preferedServerRes.statusMessage);
+            res.end();
+          });
+
+          preferedServerRes.once('error', err => {
+            console.log('res: error', err.cause, err.message);
+
+            res.writeHead(res.statusCode, err.message);
+            res.end();
+          });
+
+          preferedServerRes.pipe(res);
+        } catch (err) {
+          reject(err);
+        }
+      });
+
+      preferedServerReq.once('close', () => {
+        console.log('req: close');
+        preferedServerState.connections--;
+        resolve(undefined);
+      });
+
+      preferedServerReq.once('error', err => {
+        console.log('req: err', err.cause, err.message);
+
+        res.writeHead(400, err.message);
+        res.end();
+      });
+
+      preferedServerState.connections++;
+    } catch (err) {
+      reject(err);
     }
-
-    preferedServerRes.on('end', () => {
-      res.writeHead(200)
-      res.end()
-    });
-    preferedServerRes.pipe(res);
   });
-
-  preferedServerReq.once('close', () => {
-    preferedServerState.connections--;
-  });
-  preferedServerReq.once('error', err => {
-    res.writeHead(400, err.message);
-    res.end();
-  });
-
-  preferedServerState.connections++;
-
-  req.pipe(preferedServerReq);
 };
 
 // const clientSocket = net.createConnection(Number(PORT), req.headers.host);
