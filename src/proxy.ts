@@ -5,10 +5,8 @@ import fs from 'node:fs';
 import { DosProtection } from './protections/DosProtection.js';
 import { ServerSettings, ServerState } from './types.js';
 import { createUrlOut, evaluatePreferedServer, parseServersSettings, parseServersUsageMetric } from './utils.js';
-import { runParser, string } from './parsers.js';
 
 const {
-  HOST,
   PORT,
   ALLOWED_ORIGINS,
   SERVERS,
@@ -21,7 +19,6 @@ const {
 } = process.env;
 
 // if (Number.isNaN(SERVERS_CHECK_INTERVAL)) throw new Error('SERVERS_CHECK_INTERVAL env. variable number must be provided.');
-if (HOST === undefined) throw new Error('HOST env. variable must be provided.');
 if (Number.isNaN(CONNECTIONS_LIMIT)) throw new Error('CONNECTIONS_LIMIT env. variable number must be provided.');
 if (Number.isNaN(CONNECTION_TIMEOUT)) throw new Error('CONNECTION_TIMEOUT env. variable number must be provided.');
 if (Number.isNaN(REQ_TRANSFER_TIMEOUT)) throw new Error('REQ_TRANSFER_TIMEOUT env. variable number must be provided.');
@@ -49,15 +46,15 @@ https
         req.setTimeout(Number(CONNECTION_TIMEOUT));
 
         // gate
-        if (allowedOrigins && (origin === undefined || !allowedOrigins.includes(origin))) {
-          res.writeHead(403, `Access from origin ${origin} denied.`);
+        if (allowedOrigins && (req.headers.origin === undefined || !allowedOrigins.includes(req.headers.origin))) {
+          res.writeHead(403, `Access from origin ${req.headers.origin} denied.`);
           res.end();
           return;
         }
 
         if (!dosProtection.verify()) {
           res.writeHead(503, `Connection refused: limit overflowed.`, {
-            'access-control-allow-origin': origin,
+            'access-control-allow-origin': req.headers.origin,
           });
           res.end();
           return;
@@ -65,7 +62,7 @@ https
 
         if (req.headers['content-length'] && Number(req.headers['content-length']) > Number(MAX_REQ_BYTES)) {
           res.writeHead(413, `Req. size limit overflowed.`, {
-            'access-control-allow-origin': origin,
+            'access-control-allow-origin': req.headers.origin,
           });
           res.end();
           return;
@@ -100,7 +97,7 @@ const send = async (req: http.IncomingMessage, res: http.ServerResponse) => {
   const [preferedServerState, preferedServerIndex] = evaluatePreferedServer(serversStates);
   const preferedServerSettings = serversSettings[preferedServerIndex];
 
-  const url = createUrlOut(req.url, req.headers.host ?? HOST, preferedServerSettings);
+  const url = createUrlOut(req.url, req.headers.host, preferedServerSettings);
   let preferedServerHeaders: http.OutgoingHttpHeaders = {};
 
   for (const [k, v] of Object.entries(req.headers)) {

@@ -127,7 +127,7 @@ export const evaluatePreferedServer = (states: ServerState[]): [ServerState, num
   return [serverState, index];
 };
 
-export const createUrlOut = (url: string, host: string, serverSettings: ServerSettings) => {
+export const createUrlOut = (url: string, host: string | undefined, serverSettings: ServerSettings) => {
   let urlIn = new URL(url, `https://${host}`);
 
   urlIn.host = serverSettings.host;
