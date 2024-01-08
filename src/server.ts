@@ -1,10 +1,9 @@
-import 'dotenv/config';
 import http from 'node:http';
 import https from 'node:https';
 import fs from 'node:fs';
 import { DosProtection } from './protections/DosProtection.js';
 import { ServerSettings, ServerState } from './types.js';
-import { createUrlOut, evaluatePreferedServer, parseServersSettings, parseServersUsageMetric } from './utils.js';
+import { createUrlOut, evaluatePreferedServer, parseServersSettings } from './utils.js';
 
 const {
   PORT,
@@ -97,6 +96,8 @@ const send = async (req: http.IncomingMessage, res: http.ServerResponse) => {
   const [preferedServerState, preferedServerIndex] = evaluatePreferedServer(serversStates);
   const preferedServerSettings = serversSettings[preferedServerIndex];
 
+  console.log('preferedServerSettings', preferedServerSettings);
+
   const url = createUrlOut(req.url, req.headers.host, preferedServerSettings);
   let preferedServerHeaders: http.OutgoingHttpHeaders = {};
 
@@ -106,53 +107,49 @@ const send = async (req: http.IncomingMessage, res: http.ServerResponse) => {
 
   const preferedServerReq = req.pipe(http.request(url, { method: req.method, headers: preferedServerHeaders }));
 
+  preferedServerState.connections++;
+
   await new Promise((resolve, reject) => {
-    try {
-      preferedServerReq.on('response', preferedServerRes => {
-        try {
-          // if (preferedServerRes.statusCode !== undefined) res.statusCode = preferedServerRes.statusCode;
+    preferedServerReq.on('response', preferedServerRes => {
+      try {
+        // if (preferedServerRes.statusCode !== undefined) res.statusCode = preferedServerRes.statusCode;
 
-          for (const [k, v] of Object.entries(preferedServerRes.headers)) {
-            if (v !== undefined) res.setHeader(k, v);
-          }
-
-          preferedServerRes.once('end', () => {
-            console.log('res: end');
-
-            res.writeHead(res.statusCode, preferedServerRes.statusMessage);
-            res.end();
-          });
-
-          preferedServerRes.once('error', err => {
-            console.log('res: error', err.cause, err.message);
-
-            res.writeHead(res.statusCode, err.message);
-            res.end();
-          });
-
-          preferedServerRes.pipe(res);
-        } catch (err) {
-          reject(err);
+        for (const [k, v] of Object.entries(preferedServerRes.headers)) {
+          if (v !== undefined) res.setHeader(k, v);
         }
-      });
 
-      preferedServerReq.once('close', () => {
-        console.log('req: close');
-        preferedServerState.connections--;
-        resolve(undefined);
-      });
+        preferedServerRes.once('end', () => {
+          console.log('res: end');
 
-      preferedServerReq.once('error', err => {
-        console.log('req: err', err.cause, err.message);
+          res.writeHead(res.statusCode, preferedServerRes.statusMessage);
+          res.end();
+        });
 
-        res.writeHead(400, err.message);
-        res.end();
-      });
+        preferedServerRes.once('error', err => {
+          console.log('res: error', err.cause, err.message);
 
-      preferedServerState.connections++;
-    } catch (err) {
-      reject(err);
-    }
+          res.writeHead(res.statusCode, err.message);
+          res.end();
+        });
+
+        preferedServerRes.pipe(res);
+      } catch (err) {
+        reject(err);
+      }
+    });
+
+    preferedServerReq.once('close', () => {
+      console.log('req: close');
+      preferedServerState.connections--;
+      resolve(undefined);
+    });
+
+    preferedServerReq.once('error', err => {
+      console.log('req: err', err.cause, err.message);
+
+      res.writeHead(400, err.message);
+      res.end();
+    });
   });
 };
 
