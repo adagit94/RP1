@@ -94,33 +94,22 @@ const send = async (req: http.IncomingMessage, res: http.ServerResponse) => {
     return;
   }
 
-  const body = await receiveData(req);
   const [preferedServerState, preferedServerIndex] = evaluatePreferedServer(serversStates);
   const preferedServerSettings = serversSettings[preferedServerIndex];
-  const preferedServerReq = req.pipe(
-    http.request(createUrlOut(req.url, req.headers.host, preferedServerSettings), {
-      method: req.method,
-      headers: { ...req.headers, 'access-control-allow-origin': `https://${req.headers.host}`, origin: `https://${req.headers.host}` },
-    })
-  );
+  const preferedServerReq = http.request(createUrlOut(req.url, req.headers.host, preferedServerSettings), {
+    method: req.method,
+    headers: { ...req.headers, origin: `https://${req.headers.host}` },
+  });
 
   preferedServerReq.once('response', async preferedServerRes => {
-    try {
-      const body = await receiveData(preferedServerRes);
-
-      res.writeHead(preferedServerRes.statusCode ?? 0, preferedServerRes.headers);
-      res.end(body);
-    } catch (err: any) {
-      res.writeHead(preferedServerRes.statusCode ?? 0, err.message, preferedServerRes.headers);
-      res.end();
-    }
+    res.writeHead(preferedServerRes.statusCode ?? 0, preferedServerRes.statusMessage,  preferedServerRes.headers);
+    preferedServerRes.pipe(res);
   });
 
   preferedServerReq.once('close', () => {
     preferedServerState.connections--;
   });
 
+  req.pipe(preferedServerReq);
   preferedServerState.connections++;
-  preferedServerReq.write(body);
-  preferedServerReq.end();
 };
