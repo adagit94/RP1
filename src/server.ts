@@ -1,6 +1,5 @@
 import http from 'node:http';
 import https from 'node:https';
-import net from 'node:net';
 import fs from 'node:fs';
 import { DosProtection } from './protections/DosProtection.js';
 import { ServerSettings, ServerState } from './types.js';
@@ -10,7 +9,7 @@ const {
   PORT,
   ALLOWED_ORIGINS,
   SERVERS,
-  CONNECTIONS_LIMIT,
+  SOURCE_CONNECTIONS_LIMIT,
   CONNECTION_TIMEOUT,
   REQ_TRANSFER_TIMEOUT,
   MAX_REQ_BYTES,
@@ -19,7 +18,7 @@ const {
 } = process.env;
 
 // if (Number.isNaN(SERVERS_CHECK_INTERVAL)) throw new Error('SERVERS_CHECK_INTERVAL env. variable number must be provided.');
-if (typeof Number(CONNECTIONS_LIMIT) !== 'number') throw new Error('CONNECTIONS_LIMIT env. variable number must be provided.');
+if (typeof Number(SOURCE_CONNECTIONS_LIMIT) !== 'number') throw new Error('CONNECTIONS_LIMIT env. variable number must be provided.');
 if (typeof Number(CONNECTION_TIMEOUT) !== 'number') throw new Error('CONNECTION_TIMEOUT env. variable number must be provided.');
 if (typeof Number(REQ_TRANSFER_TIMEOUT) !== 'number') throw new Error('REQ_TRANSFER_TIMEOUT env. variable number must be provided.');
 if (typeof Number(MAX_REQ_BYTES) !== 'number') throw new Error('MAX_REQ_BYTES env. variable number must be provided.');
@@ -27,7 +26,7 @@ if (typeof Number(MAX_REQ_BYTES) !== 'number') throw new Error('MAX_REQ_BYTES en
 // const usageMetric = parseServersUsageMetric(SERVERS_USAGE_METRIC);
 const serversSettings: ServerSettings[] = parseServersSettings(SERVERS);
 const serversStates: ServerState[] = serversSettings.map(() => ({ connections: 0 }));
-const dosProtection = new DosProtection({ connectionsLimit: Number(CONNECTIONS_LIMIT) });
+const dosProtection = new DosProtection({ sourceConnectionsLimit: Number(SOURCE_CONNECTIONS_LIMIT) });
 const allowedOrigins = ALLOWED_ORIGINS ? ALLOWED_ORIGINS.split(',') : undefined;
 
 https
@@ -40,20 +39,29 @@ https
     },
     async (req, res) => {
       try {
-        dosProtection.addConnection();
-        res.once('close', dosProtection.subtractConnection);
-
         req.setTimeout(Number(CONNECTION_TIMEOUT));
-
+        
         // gate
-        if (allowedOrigins && (req.headers.origin === undefined || !allowedOrigins.includes(req.headers.origin))) {
-          res.writeHead(403, `Access from origin ${req.headers.origin} denied.`);
+        
+        if (req.headers.origin === undefined) {
+          res.writeHead(400, "Origin isn't present.");
           res.end();
           return;
         }
 
-        if (!dosProtection.verify()) {
-          res.writeHead(503, `Connection refused: limit overflowed.`, {
+        if (allowedOrigins && !allowedOrigins.includes(req.headers.origin)) {
+          res.writeHead(403, `Access from origin ${req.headers.origin} denied.`);
+          res.end();
+          return;
+        }
+        
+        const source = new URL(req.headers.origin).hostname;
+
+        dosProtection.addConnection(source);
+        res.once('close', () => dosProtection.subtractConnection(source));
+
+        if (!dosProtection.verify(source)) {
+          res.writeHead(503, `Connection refused: limit for ${source} overflowed.`, {
             'access-control-allow-origin': req.headers.origin,
           });
           res.end();
@@ -82,14 +90,8 @@ https
   .listen(Number(PORT));
 
 const send = async (req: http.IncomingMessage, res: http.ServerResponse) => {
-  if (req.method === undefined) {
-    res.writeHead(400, 'Method isnt present.');
-    res.end();
-    return;
-  }
-
   if (req.url === undefined) {
-    res.writeHead(400, 'Url isnt present.');
+    res.writeHead(400, 'Url not found.');
     res.end();
     return;
   }
@@ -102,7 +104,7 @@ const send = async (req: http.IncomingMessage, res: http.ServerResponse) => {
   });
 
   preferedServerReq.once('response', async preferedServerRes => {
-    res.writeHead(preferedServerRes.statusCode ?? 0, preferedServerRes.statusMessage,  preferedServerRes.headers);
+    res.writeHead(preferedServerRes.statusCode ?? 0, preferedServerRes.statusMessage, preferedServerRes.headers);
     preferedServerRes.pipe(res);
   });
 
