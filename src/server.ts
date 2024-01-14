@@ -3,13 +3,13 @@ import https from 'node:https';
 import fs from 'node:fs';
 import { DosProtection } from './protections/DosProtection.js';
 import { ServerSettings, ServerState } from './types.js';
-import { createUrlOut, evaluatePreferedServer, parseServersSettings, receiveData } from './utils.js';
+import { createUrlOut, evaluatePreferedServer, parseServersSettings } from './utils.js';
 
 const {
   PORT,
   ALLOWED_ORIGINS,
   SERVERS,
-  SOURCE_CONNECTIONS_LIMIT,
+  IP_CONNECTIONS_LIMIT,
   CONNECTION_TIMEOUT,
   REQ_TRANSFER_TIMEOUT,
   MAX_REQ_BYTES,
@@ -18,7 +18,7 @@ const {
 } = process.env;
 
 // if (Number.isNaN(SERVERS_CHECK_INTERVAL)) throw new Error('SERVERS_CHECK_INTERVAL env. variable number must be provided.');
-if (typeof Number(SOURCE_CONNECTIONS_LIMIT) !== 'number') throw new Error('CONNECTIONS_LIMIT env. variable number must be provided.');
+if (typeof Number(IP_CONNECTIONS_LIMIT) !== 'number') throw new Error('IP_CONNECTIONS_LIMIT env. variable number must be provided.');
 if (typeof Number(CONNECTION_TIMEOUT) !== 'number') throw new Error('CONNECTION_TIMEOUT env. variable number must be provided.');
 if (typeof Number(REQ_TRANSFER_TIMEOUT) !== 'number') throw new Error('REQ_TRANSFER_TIMEOUT env. variable number must be provided.');
 if (typeof Number(MAX_REQ_BYTES) !== 'number') throw new Error('MAX_REQ_BYTES env. variable number must be provided.');
@@ -26,7 +26,7 @@ if (typeof Number(MAX_REQ_BYTES) !== 'number') throw new Error('MAX_REQ_BYTES en
 // const usageMetric = parseServersUsageMetric(SERVERS_USAGE_METRIC);
 const serversSettings: ServerSettings[] = parseServersSettings(SERVERS);
 const serversStates: ServerState[] = serversSettings.map(() => ({ connections: 0 }));
-const dosProtection = new DosProtection({ sourceConnectionsLimit: Number(SOURCE_CONNECTIONS_LIMIT) });
+const dosProtection = new DosProtection({ ipConnectionsLimit: Number(IP_CONNECTIONS_LIMIT) });
 const allowedOrigins = ALLOWED_ORIGINS ? ALLOWED_ORIGINS.split(',') : undefined;
 
 https
@@ -40,28 +40,28 @@ https
     async (req, res) => {
       try {
         req.setTimeout(Number(CONNECTION_TIMEOUT));
-        
-        // gate
-        
-        if (req.headers.origin === undefined) {
-          res.writeHead(400, "Origin isn't present.");
-          res.end();
-          return;
-        }
 
-        if (allowedOrigins && !allowedOrigins.includes(req.headers.origin)) {
+        // gate
+
+        if (allowedOrigins && (req.headers.origin === undefined || !allowedOrigins.includes(req.headers.origin))) {
           res.writeHead(403, `Access from origin ${req.headers.origin} denied.`);
           res.end();
           return;
         }
-        
-        const source = new URL(req.headers.origin).hostname;
 
-        dosProtection.addConnection(source);
-        res.once('close', () => dosProtection.subtractConnection(source));
+        const ip = req.socket.remoteAddress;
 
-        if (!dosProtection.verify(source)) {
-          res.writeHead(503, `Connection refused: limit for ${source} overflowed.`, {
+        if (ip === undefined) {
+          res.writeHead(400, 'IP address undetectable.');
+          res.end();
+          return;
+        }
+
+        dosProtection.addConnection(ip);
+        res.once('close', () => dosProtection.subtractConnection(ip));
+
+        if (!dosProtection.verify(ip)) {
+          res.writeHead(503, `Connection refused: limit for ${ip} overflowed.`, {
             'access-control-allow-origin': req.headers.origin,
           });
           res.end();
@@ -100,7 +100,7 @@ const send = async (req: http.IncomingMessage, res: http.ServerResponse) => {
   const preferedServerSettings = serversSettings[preferedServerIndex];
   const preferedServerReq = http.request(createUrlOut(req.url, req.headers.host, preferedServerSettings), {
     method: req.method,
-    headers: { ...req.headers, origin: `https://${req.headers.host}` },
+    headers: { ...req.headers, origin: req.headers.origin },
   });
 
   preferedServerReq.once('response', async preferedServerRes => {

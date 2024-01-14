@@ -1,18 +1,18 @@
 type TDosProtectionConf = {
-  sourceConnectionsLimit: number;
+  ipConnectionsLimit: number;
 };
 
 interface IDosProtection {
-  addConnection: (source: string) => void;
-  subtractConnection: (source: string) => void;
-  verify: (source: string) => boolean;
+  addConnection: (ip: string) => void;
+  subtractConnection: (ip: string) => void;
+  verify: (ip: string) => boolean;
 }
 
 export class DosProtection implements IDosProtection {
   private conf: TDosProtectionConf;
 
   /**
-   * @param {number} conf.sourceConnectionsLimit - max. count of connections per domain/ip address
+   * @param {number} conf.ipConnectionsLimit - max. count of connections per domain/ip address
    */
   constructor(conf: TDosProtectionConf) {
     this.conf = conf;
@@ -20,13 +20,13 @@ export class DosProtection implements IDosProtection {
 
   private connections: Record<string, number> = {};
 
-  public addConnection = (source: string) => {
-    this.connections = { ...this.connections, [source]: this.connections[source] + 1 };
+  public addConnection = (ip: string) => {
+    this.connections = { ...this.connections, [ip]: (this.connections[ip] ?? 0) + 1 };
   };
 
-  public subtractConnection = (source: string) => {
-    this.connections = { ...this.connections, [source]: this.connections[source] - 1 };
+  public subtractConnection = (ip: string) => {
+    this.connections = { ...this.connections, [ip]: this.connections[ip] - 1 };
   };
 
-  public verify = (source: string) => this.connections[source] <= this.conf.sourceConnectionsLimit;
+  public verify = (ip: string) => this.connections[ip] <= this.conf.ipConnectionsLimit;
 }
