@@ -1,5 +1,6 @@
 export type ServerSettings = {
   host: string;
+  connectionsLimit: number
 };
 
 export enum RemoteServerMetric {

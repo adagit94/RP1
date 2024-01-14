@@ -35,5 +35,5 @@ export class DosProtection implements IDosProtection {
     if (this.conf.totalConnectionsLimit !== undefined) this.connectionsSum--
   };
 
-  public verify = (ip: string) => this.connections[ip] <= this.conf.ipConnectionsLimit && (this.conf.totalConnectionsLimit === undefined || this.connectionsSum <= this.conf.totalConnectionsLimit);
+  public verify = (ip: string) => this.connections[ip] < this.conf.ipConnectionsLimit && (this.conf.totalConnectionsLimit === undefined || this.connectionsSum < this.conf.totalConnectionsLimit);
 }

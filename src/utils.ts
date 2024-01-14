@@ -11,6 +11,7 @@ export const parseServersSettings = (x: unknown) => {
       parsers.array(
         parsers.object<ServerSettings>({
           host: parsers.string,
+          connectionsLimit: parsers.number,
         })
       ),
       JSON.parse(str)

@@ -20,7 +20,8 @@ const {
 } = process.env;
 
 // if (Number.isNaN(SERVERS_CHECK_INTERVAL)) throw new Error('SERVERS_CHECK_INTERVAL env. variable number must be provided.');
-if (TOTAL_CONNECTIONS_LIMIT !== undefined && typeof Number(TOTAL_CONNECTIONS_LIMIT) !== 'number') throw new Error('TOTAL_CONNECTIONS_LIMIT env. variable must be number or undefined.');
+if (TOTAL_CONNECTIONS_LIMIT !== undefined && typeof Number(TOTAL_CONNECTIONS_LIMIT) !== 'number')
+  throw new Error('TOTAL_CONNECTIONS_LIMIT env. variable must be number or undefined.');
 if (typeof Number(IP_CONNECTIONS_LIMIT) !== 'number') throw new Error('IP_CONNECTIONS_LIMIT env. variable number must be provided.');
 if (typeof Number(CONNECTION_TIMEOUT) !== 'number') throw new Error('CONNECTION_TIMEOUT env. variable number must be provided.');
 if (typeof Number(REQ_TRANSFER_TIMEOUT) !== 'number') throw new Error('REQ_TRANSFER_TIMEOUT env. variable number must be provided.');
@@ -67,8 +68,13 @@ https
           return;
         }
 
-        dosProtection.addConnection(ip);
-        res.once('close', () => dosProtection.subtractConnection(ip));
+        if (req.headers['content-length'] && Number(req.headers['content-length']) > Number(MAX_REQ_BYTES)) {
+          res.writeHead(413, `Req. size limit overflowed.`, {
+            'access-control-allow-origin': req.headers.origin,
+          });
+          res.end();
+          return;
+        }
 
         if (!dosProtection.verify(ip)) {
           res.writeHead(503, `Connection refused: limit overflowed.`, {
@@ -78,13 +84,8 @@ https
           return;
         }
 
-        if (req.headers['content-length'] && Number(req.headers['content-length']) > Number(MAX_REQ_BYTES)) {
-          res.writeHead(413, `Req. size limit overflowed.`, {
-            'access-control-allow-origin': req.headers.origin,
-          });
-          res.end();
-          return;
-        }
+        dosProtection.addConnection(ip);
+        res.once('close', () => dosProtection.subtractConnection(ip));
 
         await send(req, res);
       } catch (err) {
@@ -108,6 +109,15 @@ const send = async (req: http.IncomingMessage, res: http.ServerResponse) => {
 
   const [preferedServerState, preferedServerIndex] = evaluatePreferedServer(serversStates);
   const preferedServerSettings = serversSettings[preferedServerIndex];
+
+  if (preferedServerState.connections >= preferedServerSettings.connectionsLimit) {
+    res.writeHead(503, `Connection refused: limit overflowed.`, {
+      'access-control-allow-origin': req.headers.origin,
+    });
+    res.end();
+    return;
+  }
+
   const preferedServerReq = http.request(createUrlOut(req.url, req.headers.host, preferedServerSettings), {
     method: req.method,
     headers: { ...req.headers, origin: req.headers.origin },
@@ -122,6 +132,6 @@ const send = async (req: http.IncomingMessage, res: http.ServerResponse) => {
     preferedServerState.connections--;
   });
 
-  req.pipe(preferedServerReq);
   preferedServerState.connections++;
+  req.pipe(preferedServerReq);
 };
