@@ -9,6 +9,7 @@ const {
   PORT,
   ALLOWED_ORIGINS,
   SERVERS,
+  TOTAL_CONNECTIONS_LIMIT,
   IP_CONNECTIONS_LIMIT,
   CONNECTION_TIMEOUT,
   REQ_TRANSFER_TIMEOUT,
@@ -18,6 +19,7 @@ const {
 } = process.env;
 
 // if (Number.isNaN(SERVERS_CHECK_INTERVAL)) throw new Error('SERVERS_CHECK_INTERVAL env. variable number must be provided.');
+if (TOTAL_CONNECTIONS_LIMIT !== undefined && typeof Number(TOTAL_CONNECTIONS_LIMIT) !== 'number') throw new Error('TOTAL_CONNECTIONS_LIMIT env. variable must be number or undefined.');
 if (typeof Number(IP_CONNECTIONS_LIMIT) !== 'number') throw new Error('IP_CONNECTIONS_LIMIT env. variable number must be provided.');
 if (typeof Number(CONNECTION_TIMEOUT) !== 'number') throw new Error('CONNECTION_TIMEOUT env. variable number must be provided.');
 if (typeof Number(REQ_TRANSFER_TIMEOUT) !== 'number') throw new Error('REQ_TRANSFER_TIMEOUT env. variable number must be provided.');
@@ -26,7 +28,7 @@ if (typeof Number(MAX_REQ_BYTES) !== 'number') throw new Error('MAX_REQ_BYTES en
 // const usageMetric = parseServersUsageMetric(SERVERS_USAGE_METRIC);
 const serversSettings: ServerSettings[] = parseServersSettings(SERVERS);
 const serversStates: ServerState[] = serversSettings.map(() => ({ connections: 0 }));
-const dosProtection = new DosProtection({ ipConnectionsLimit: Number(IP_CONNECTIONS_LIMIT) });
+const dosProtection = new DosProtection({ ipConnectionsLimit: Number(IP_CONNECTIONS_LIMIT), totalConnectionsLimit: Number(TOTAL_CONNECTIONS_LIMIT) });
 const allowedOrigins = ALLOWED_ORIGINS ? ALLOWED_ORIGINS.split(',') : undefined;
 
 https
@@ -61,7 +63,7 @@ https
         res.once('close', () => dosProtection.subtractConnection(ip));
 
         if (!dosProtection.verify(ip)) {
-          res.writeHead(503, `Connection refused: limit for ${ip} overflowed.`, {
+          res.writeHead(503, `Connection refused: limit overflowed.`, {
             'access-control-allow-origin': req.headers.origin,
           });
           res.end();
