@@ -8,6 +8,7 @@ import { createUrlOut, evaluatePreferedServer, parseServersSettings } from './ut
 const {
   PORT,
   ALLOWED_ORIGINS,
+  ALLOWED_IPS,
   SERVERS,
   TOTAL_CONNECTIONS_LIMIT,
   IP_CONNECTIONS_LIMIT,
@@ -30,6 +31,7 @@ const serversSettings: ServerSettings[] = parseServersSettings(SERVERS);
 const serversStates: ServerState[] = serversSettings.map(() => ({ connections: 0 }));
 const dosProtection = new DosProtection({ ipConnectionsLimit: Number(IP_CONNECTIONS_LIMIT), totalConnectionsLimit: Number(TOTAL_CONNECTIONS_LIMIT) });
 const allowedOrigins = ALLOWED_ORIGINS ? ALLOWED_ORIGINS.split(',') : undefined;
+const allowedIPs = ALLOWED_IPS ? ALLOWED_IPS.split(',') : undefined;
 
 https
   .createServer(
@@ -55,6 +57,12 @@ https
 
         if (ip === undefined) {
           res.writeHead(400, 'IP address undetectable.');
+          res.end();
+          return;
+        }
+
+        if (allowedIPs && !allowedIPs.includes(ip)) {
+          res.writeHead(403, `Access from IP address ${ip} denied.`);
           res.end();
           return;
         }
